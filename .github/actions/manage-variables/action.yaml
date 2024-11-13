@@ -1,0 +1,63 @@
+name: 'Manage Environment Variable'
+description: 'Create or update a repository variable for a given GitHub environment'
+
+inputs:
+  environment_name:
+    description: 'Name of the environment'
+    required: true
+  variable_name:
+    description: 'Name of the variable'
+    required: true
+  variable_value:
+    description: 'Value of the variable'
+    required: true
+  app_id:
+    description: 'Github App ID'
+    required: true
+  private_key:
+    description: 'Private Key for the Github App'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    # GITHUB APP TOKEN REQUIRED FOR CREATING AND MODIFYING REPOSITORY VARIABLES
+    - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app_id: ${{ inputs.app-id }}
+          private_key: ${{ inputs.private-key }}
+    
+    - name: Check if variable exists
+      id: check_variable
+      shell: bash
+      run: |
+        VARIABLE_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Bearer ${{ steps.generate-token.outputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "${{ github.api_url }}/repos/${{ github.repository }}/environments/${{ inputs.environment_name }}/variables/${{ inputs.variable_name }}")
+        if [ "$VARIABLE_EXISTS" -eq 200 ]; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create or Update Variable
+      shell: bash
+      run: |
+        if [ "${{ steps.check_variable.outputs.exists }}" = "true" ]; then
+          curl -X PATCH \
+            -H "Authorization: Bearer ${{ steps.generate-token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/environments/${{ inputs.environment_name }}/variables/${{ inputs.variable_name }}" \
+            -d '{"name":"${{ inputs.variable_name }}","value":"${{ inputs.variable_value }}"}'
+          echo "Updated variable ${{ inputs.variable_name }} in environment ${{ inputs.environment_name }}"
+        else
+          curl -X POST \
+            -H "Authorization: Bearer ${{ steps.generate-token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/environments/${{ inputs.environment_name }}/variables" \
+            -d '{"name":"${{ inputs.variable_name }}","value":"${{ inputs.variable_value }}"}'
+          echo "Created variable ${{ inputs.variable_name }} in environment ${{ inputs.environment_name }}"
+        fi
