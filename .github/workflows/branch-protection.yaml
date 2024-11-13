@@ -1,90 +1,37 @@
 name: Create Branch Protection Ruleset
 
 on:
-  workflow_dispatch: # Manually trigger the workflow from the GitHub Actions tab
+  workflow_dispatch: 
 
 jobs:
   create-ruleset:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up GitHub API auth token
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up variables
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
 
-      - name: Create Branch Protection Ruleset
-        id: ruleset
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
+      - name: Load Branch Protection Rules JSON
+        id: load-rules
+        run: |
+          RULESET_BODY=$(<.github/workflows/branch-rules.json)
+          echo "RULESET_BODY=$RULESET_BODY" >> $GITHUB_ENV
 
-            // Define branch ruleset settings
-            const rulesetData = {
-              name: "DevSecOps Branch Protection",
-              target: {
-                repository_id: context.payload.repository.node_id
-              },
-              enforcement: "enabled",
-              conditions: {
-                ref_name: {
-                  include: ["main", "prpd", "dev"]
-                }
-              },
-              rules: [
-                {
-                  type: "required_pull_request_reviews",
-                  configuration: {
-                    dismiss_stale_reviews: true,
-                    require_code_owner_reviews: true,
-                    required_approving_review_count: 2
-                  }
-                },
-                {
-                  type: "required_status_checks",
-                  configuration: {
-                    strict: true,
-                    contexts: ["build", "test", "security", "integration", "acceptance", "unit-test", "linting"]
-                  }
-                },
-                {
-                  type: "required_signatures",
-                  configuration: {}
-                },
-                {
-                  type: "required_conversation_resolution",
-                  configuration: {}
-                },
-                {
-                  type: "required_linear_history",
-                  configuration: {}
-                },
-                {
-                  type: "required_deployments",
-                  configuration: {
-                    environments: ["prpd", "prod"]
-                  }
-                },
-                {
-                  type: "push_restrictions",
-                  configuration: {
-                    users: ["trusted-user"],
-                    teams: ["devsecops-team"]
-                  }
-                }
-              ]
-            };
-
-            // Send a POST request to create the ruleset
-            const response = await github.rest.repos.createBranchProtectionRule({
-              owner,
-              repo,
-              ...rulesetData
-            });
-
-            if (response.status === 201) {
-              console.log("Ruleset created successfully");
-            } else {
-              throw new Error(`Failed to create ruleset: ${response.status} ${response.statusText}`);
-            }
+      - name: Apply Branch Protection Ruleset
+        run: |
+          BRANCHES=("main" "prpd" "dev")
+          
+          for BRANCH in "${BRANCHES[@]}"; do
+            echo "Applying branch protection to $BRANCH..."
+            
+            curl -X PUT -H "Authorization: token $TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/branches/$BRANCH/protection \
+              -d "$RULESET_BODY"
+          done
