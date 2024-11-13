@@ -1,0 +1,52 @@
+name: "Check Open Issues"
+description: "Check for open issues with specific titles."
+
+inputs:
+  token:
+    description: "GitHub Token"
+    required: true
+  repo:
+    description: "GitHub Repository with Org Name - org/repo"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.x'
+
+    - name: Install Dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: Debugging Step
+      shell: bash
+      run: |
+        echo "****************************************************************"
+        echo "Current Directory:"
+        pwd
+        echo "List of Files:"
+        ls -alrt
+        echo "Inputs:"
+        echo "Token: ${{ inputs.token }}"
+        echo "Repo: ${{ inputs.repo }}"
+        echo "****************************************************************"
+
+    - name: Run Check Open Issues Script
+      shell: bash
+      run: |
+        echo "Running the Check Open Issues Python script with the following parameters:"
+        echo "  Token: Provided securely (hidden)"
+        echo "  Repository: ${{ inputs.repo }}"
+        echo "****************************************************************"
+        python ${{ github.action_path }}/check-open-issues.py ${{ inputs.token }} ${{ inputs.repo }}
+        echo "****************************************************************"
+        echo "Script execution completed. Please check the above logs for any issues."
+        echo "****************************************************************"
