@@ -1,0 +1,121 @@
+name: Apply Branch Protection Ruleset
+
+on:
+  workflow_dispatch:
+    inputs:
+      organization:
+        description: 'Organization name'
+        required: true
+        type: choice
+        options:
+          - SandboxOrg
+          - EnterpriseOrg
+        default: EnterpriseOrg
+      repository:
+        description: 'Repository name'
+        required: true
+        default: my-maven
+      ruleset_file:
+        description: 'The JSON file containing the ruleset configuration (relative path if needed)'
+        required: true
+        default: 'standard-branch-protection-ruleset.json'
+
+jobs:
+  configure_branch_protection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Verify Ruleset File Existence
+        id: verify_file
+        run: |
+          set -e
+          RULESET_FILE=${{ github.event.inputs.ruleset_file }}
+          if [ ! -f "$RULESET_FILE" ]; then
+            echo "Error: Ruleset file '$RULESET_FILE' not found."
+            exit 1
+          fi
+          exit 0
+
+      - name: Check if Ruleset Exists
+        id: check_ruleset
+        run: |
+          set -e
+          ORG=${{ github.event.inputs.organization }}
+          REPO=${{ github.event.inputs.repository }}
+
+          # Make a GET request to list all existing rulesets
+          HTTP_STATUS=$(curl -o rulesets.json -w "%{http_code}" -X GET \
+            -H "Authorization: token ${{ secrets.GITHUB_PAC }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/$ORG/$REPO/rulesets)
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Error: Failed to retrieve rulesets. Status code: $HTTP_STATUS"
+            echo "Response: $(cat rulesets.json)"
+            exit 1
+          fi
+
+          # Check if the rulesets object exists and contains any items
+          if [ "$(jq 'has("rulesets")' rulesets.json)" != "true" ]; then
+            echo "No rulesets found for repository $REPO. Proceeding to create a new ruleset."
+            echo "RULESET_ID=new" >> $GITHUB_ENV
+          else
+            # Check if a ruleset with the name 'Enterprise Standard Branch Protection Ruleset' exists
+            RULESET_ID=$(jq -r '.rulesets[] | select(.name=="Standard Branch Protection Ruleset") | .id' rulesets.json)
+
+            if [ -n "$RULESET_ID" ]; then
+              echo "Ruleset 'Standard Branch Protection Ruleset' exists with ID: $RULESET_ID"
+              echo "RULESET_ID=$RULESET_ID" >> $GITHUB_ENV
+            else
+              echo "Ruleset 'Standard Branch Protection Ruleset' does not exist. Creating a new one."
+              echo "RULESET_ID=new" >> $GITHUB_ENV
+            fi
+          fi
+          exit 0
+
+      - name: Create or Update Branch Protection Ruleset
+        id: create_update_ruleset
+        run: |
+          set -e
+          ORG=${{ github.event.inputs.organization }}
+          REPO=${{ github.event.inputs.repository }}
+          RULESET_ID=${{ env.RULESET_ID }}
+          RULESET_FILE=${{ github.event.inputs.ruleset_file }}
+
+          if [ "$RULESET_ID" = "new" ]; then
+            # Create a new ruleset using the provided JSON file
+            HTTP_STATUS=$(curl -o response.json -w "%{http_code}" -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_PAC }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -d @$RULESET_FILE \
+              https://api.github.com/repos/$ORG/$REPO/rulesets)
+
+            # Check if the creation was successful
+            if [ "$HTTP_STATUS" -ne 201 ]; then
+              echo "Error: Failed to create branch protection ruleset. Status code: $HTTP_STATUS"
+              echo "Response: $(cat response.json)"
+              exit 1
+            else
+              echo "Branch protection ruleset successfully created."
+            fi
+
+          else
+            # Update the existing ruleset using the provided JSON file
+            HTTP_STATUS=$(curl -o response.json -w "%{http_code}" -X PUT \
+              -H "Authorization: token ${{ secrets.GITHUB_PAC }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -d @$RULESET_FILE \
+              https://api.github.com/repos/$ORG/$REPO/rulesets/$RULESET_ID)
+
+            # Check if the update was successful
+            if [ "$HTTP_STATUS" -ne 200 ]; then
+              echo "Error: Failed to update branch protection ruleset. Status code: $HTTP_STATUS"
+              echo "Response: $(cat response.json)"
+              exit 1
+            else
+              echo "Branch protection ruleset successfully updated."
+            fi
+          fi
+          exit 0
