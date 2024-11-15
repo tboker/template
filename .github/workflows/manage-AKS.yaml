@@ -1,0 +1,120 @@
+name: AKS Management
+
+on:
+  workflow_dispatch: 
+
+jobs:
+  delete-namespace:
+    environment: dev
+    permissions:
+      id-token: write 
+      contents: read
+    runs-on: ubuntu-latest  # Use a runner with necessary tools
+    steps:
+      # Step 1: Checkout the repository (optional, for logging/debugging)
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Login to Azure using OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          tenant-id: ${{ secrets.ARM_TENANT_ID }}
+
+      # Install kubelogin
+      - name: Install kubelogin
+        run: |
+          echo "Installing kubelogin..."
+          sudo az aks install-cli --install-location /usr/local/bin/kubelogin
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.RESOURCE_GROUP }}
+          cluster-name: ${{ vars.CLUSTER_NAME }}
+
+      # Configure kubelogin for authentication
+      - name: Configure kubelogin for AKS
+        run: |
+          kubelogin convert-kubeconfig -l azurecli
+
+      - name: AKS Commands
+        env: 
+          CONTAINER_NAME: "containerName"
+          DEPLOYMENT_NAME: "deploymentName"
+          INGRESS_NAME: "ingressName"
+          POD_NAME: "podName"
+        run: |
+          echo "Getting basic cluster info:"
+          kubectl cluster-info
+
+          echo "Listing all nodes in the cluster:"
+          kubectl get nodes
+
+          echo "Describing nodes for detailed information:"
+          kubectl describe nodes
+
+          echo "Listing all namespaces in the cluster:"
+          kubectl get namespaces
+
+          echo "Getting pods in all namespaces (high-level view):"
+          kubectl get pods --all-namespaces
+
+          echo "Getting services in all namespaces:"
+          kubectl get svc --all-namespaces
+
+          echo "Listing all deployments in the cluster:"
+          kubectl get deployments --all-namespaces
+
+          echo "Describing a specific deployment (replace DEPLOYMENT_NAME and NAMESPACE):"
+          kubectl describe deployment ${{ env.DEPLOYMENT_NAME}} -n NAMESPACE
+
+          echo "Listing ReplicaSets in all namespaces:"
+          kubectl get replicasets --all-namespaces
+
+          echo "Listing DaemonSets in all namespaces:"
+          kubectl get daemonsets --all-namespaces
+
+          echo "Listing StatefulSets in all namespaces:"
+          kubectl get statefulsets --all-namespaces
+
+          #echo "Getting details about a specific pod (replace POD_NAME and NAMESPACE):"
+          kubectl describe pod ${{env.POD_NAME }} -n ${{ vars.NAMESPACE }}
+
+          #echo "Getting logs for a specific pod (replace POD_NAME and CONTAINER_NAME):"
+          #kubectl logs POD_NAME -c ${{ env.CONTAINER_NAME }} -n ${{ vars.NAMESPACE }}
+
+          echo "Listing all ConfigMaps in the cluster:"
+          kubectl get configmaps --all-namespaces
+
+          echo "Listing all Secrets in the cluster:"
+          kubectl get secrets --all-namespaces
+
+          echo "Listing all Ingress resources in the cluster:"
+          kubectl get ingress --all-namespaces
+
+          #echo "Describing a specific Ingress resource (replace INGRESS_NAME and NAMESPACE):"
+          #kubectl describe ingress ${{ env.INGRESS_NAME }} -n ${{ vars.NAMESPACE }}
+
+          echo "Checking cluster events for troubleshooting:"
+          kubectl get events --sort-by=.metadata.creationTimestamp -A
+
+          echo "Listing PersistentVolumeClaims (PVCs) in all namespaces:"
+          kubectl get pvc --all-namespaces
+
+          echo "Listing PersistentVolumes (PVs) in the cluster:"
+          kubectl get pv
+
+          echo "Describing the AKS-specific resources:"
+          kubectl get nodes -o wide
+
+          echo "Getting detailed metrics for the cluster (requires Metrics Server installed):"
+          kubectl top nodes
+          kubectl top pods --all-namespaces
+
+          echo "Running a test deployment to validate cluster functionality (replace with your image and namespace):"
+          kubectl run test-deployment --image=nginx --port=80 --restart=Never -n ${{ vars.NAMESPACE }}
+
+          echo "Deleting the test deployment to clean up:"
+          kubectl delete pod test-deployment -n ${{ vars.NAMESPACE }}
