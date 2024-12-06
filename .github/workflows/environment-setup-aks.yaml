@@ -1,0 +1,105 @@
+name: Environment Setup
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Optional: Predefined environment (e.g., dev, prpd, prod)"
+        required: false
+        type: string
+      runner:
+        description: "GitHub runner to use"
+        required: true
+        type: string
+
+    outputs:
+      environment:
+        description: "The determined environment (dev, prpd, prod)"
+        value: ${{ jobs.set-environment-variables.outputs.environment }}
+      aks_resource_group:
+        description: "The AKS resource group for the environment"
+        value: ${{ jobs.set-environment-variables.outputs.aks_resource_group }}
+      aks_cluster_name:
+        description: "The AKS cluster name for the environment"
+        value: ${{ jobs.set-environment-variables.outputs.aks_cluster_name }}
+      aks_namespace:
+        description: "The AKS namespace for the environment"
+        value: ${{ jobs.set-environment-variables.outputs.aks_namespace }}
+      azure_client_id:
+        description: "Azure Client ID"
+        value: ${{ jobs.set-environment-variables.outputs.azure_client_id }}
+      azure_subscription_id:
+        description: "Azure Subscription ID"
+        value: ${{ jobs.set-environment-variables.outputs.azure_subscription_id }}
+      helm_chart_path:
+        description: "The path to the Helm chart"
+        value: ${{ jobs.set-environment-variables.outputs.helm_chart_path }}
+      helm_release_name:
+        description: "The Helm release name"
+        value: ${{ jobs.set-environment-variables.outputs.helm_release_name }}
+
+jobs:
+  determine-environment:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+    steps:
+      - name: Determine Environment
+        id: set-env
+        run: |
+          if [[ "${{ inputs.environment }}" ]]; then
+            echo "Using provided environment: ${{ inputs.environment }}"
+            echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          else
+            branch=${{ github.ref_name }}
+            echo "Determining environment from branch: $branch"
+            case "$branch" in
+              main | *release* | release/*)
+                echo "environment=prod" >> $GITHUB_OUTPUT
+                ;;
+              staging | *prpd* | prpd/*)
+                echo "environment=prpd" >> $GITHUB_OUTPUT
+                ;;
+              *)
+                echo "environment=dev" >> $GITHUB_OUTPUT
+                ;;
+            esac
+          fi
+
+  set-environment-variables:
+    needs: determine-environment
+    runs-on: ${{ inputs.runner }}
+    environment: ${{ needs.determine-environment.outputs.environment }}
+    outputs:
+      environment: ${{ needs.determine-environment.outputs.environment }}
+      aks_cluster_name: ${{ steps.set-vars.outputs.aks_cluster_name }}
+      aks_namespace: ${{ steps.set-vars.outputs.aks_namespace }}
+      aks_resource_group: ${{ steps.set-vars.outputs.aks_resource_group }}
+      azure_client_id: ${{ steps.set-vars.outputs.azure_client_id }}
+      azure_subscription_id: ${{ steps.set-vars.outputs.azure_subscription_id }}
+      helm_chart_path: ${{ steps.set-vars.outputs.helm_chart_path }}
+      helm_release_name: ${{ steps.set-vars.outputs.helm_release_name }}
+
+    steps:
+      - name: Set Environment-Specific Variables
+        id: set-vars
+        run: |
+          echo "aks_cluster_name=${{ vars.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "aks_namespace=${{ vars.AKS_NAMESPACE }}" >> $GITHUB_OUTPUT
+          echo "aks_resource_group=${{ vars.AKS_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "azure_client_id=${{ vars.AZURE_CLIENT_ID }}" >> $GITHUB_OUTPUT
+          echo "azure_subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_OUTPUT
+          echo "helm_chart_path=${{ vars.HELM_CHART_PATH }}" >> $GITHUB_OUTPUT
+          echo "helm_release_name=${{ vars.HELM_RELEASE_NAME }}" >> $GITHUB_OUTPUT
+
+      - name: Debug Outputs
+        run: |
+          echo "Debugging Outputs:"
+          echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+          echo "AKS Cluster Name: ${{ steps.set-vars.outputs.aks_cluster_name }}"
+          echo "AKS Namespace: ${{ steps.set-vars.outputs.aks_namespace }}"
+          echo "AKS Resource Group: ${{ steps.set-vars.outputs.aks_resource_group }}"
+          echo "Azure Client ID: ${{ steps.set-vars.outputs.azure_client_id }}"
+          echo "Azure Subscription ID: ${{ steps.set-vars.outputs.azure_subscription_id }}"
+          echo "Helm Chart Path: ${{ steps.set-vars.outputs.helm_chart_path }}"
+          echo "Helm Release Name: ${{ steps.set-vars.outputs.helm_release_name }}"
