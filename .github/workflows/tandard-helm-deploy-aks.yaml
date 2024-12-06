@@ -1,0 +1,148 @@
+name: Standard Helm Deployment - AKS
+
+on:
+  workflow_call:
+    inputs:
+      aks_cluster_name:
+        required: true
+        type: string
+      aks_resource_group:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string   # input for dev, prpd, or prod
+      helm_release_name:
+        required: true
+        type: string
+      helm_chart_path:
+        required: false
+        type: string
+      namespace:
+        required: false
+        default: "default"
+        type: string
+      runner:
+        required: false
+        type: string
+
+    secrets:
+      azure_client_id:
+        required: true
+      azure_subscription_id:
+        required: true
+      azure_tenant_id:
+        required: true
+
+jobs:
+
+  deploy:
+    runs-on: ${{ inputs.runner }}  # Use the input with a default value
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write  # Required for OIDC login
+      contents: read
+
+    steps:
+      # DEBUGGING STEP
+      - name: Print Inputs
+        run: |
+          echo "Received inputs:"
+          echo "aks_cluster_name: ${{ inputs.aks_cluster_name }}"
+          echo "aks_resource_group: ${{ inputs.aks_resource_group }}"
+          echo "helm_release_name: ${{ inputs.helm_release_name }}"
+          echo "helm_chart_path: ${{ inputs.helm_chart_path }}"
+          echo "namespace: ${{ inputs.namespace }}"
+          echo "runner: ${{ inputs.runner }}"
+
+      - name: Check Secrets
+        run: |
+          if [ -z "${{ secrets.azure_client_id }}" ]; then
+            echo "Error: azure_client_id is missing or empty." >&2
+            exit 1
+          fi
+          if [ -z "${{ secrets.azure_subscription_id }}" ]; then
+            echo "Error: azure_subscription_id is missing or empty." >&2
+            exit 1
+          fi
+          if [ -z "${{ secrets.azure_tenant_id }}" ]; then
+            echo "Error: azure_tenant_id is missing or empty." >&2
+            exit 1
+          fi
+        shell: bash
+
+        - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Login to Azure using OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure_client_id }}
+          subscription-id: ${{ secrets.azure_subscription_id }}
+          tenant-id: ${{ secrets.azure_tenant_id }}
+
+      # Install kubelogin
+      - name: Install kubelogin
+        run: |
+          echo "Installing kubelogin..."
+          sudo az aks install-cli --install-location /usr/local/bin/kubelogin
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ inputs.aks_resource_group }}
+          cluster-name: ${{ inputs.aks_cluster_name }}
+
+      # Configure kubelogin for authentication
+      - name: Configure kubelogin for AKS
+        run: |
+          kubelogin convert-kubeconfig -l azurecli
+
+
+      - name: Build Helm Values File Arguments
+        id: build_values_args
+        run: |
+          values_args="-f ${{ inputs.helm_chart_path }}/values.yaml"
+          echo "values_args=$values_args" >> $GITHUB_ENV
+
+      # Check if Helm is installed; if not, install it
+      - name: Install Helm
+        run: |
+          if ! command -v helm &> /dev/null; then
+            echo "Helm not found, installing..."
+            az acr helm install-cli
+          fi
+          # Output the Helm version
+          echo "Using Helm version:"
+          helm version --short
+
+      - name: Deploy Helm Chart with Debugging
+        run: |
+          # Start a background job to monitor Kubernetes resources
+          echo "Starting background job to monitor pod status in namespace: ${{ inputs.namespace }}"
+          (
+            for i in {1..10}; do
+              echo "Checking pod status (attempt $i)..."
+              kubectl get pods -n ${{ inputs.namespace }}
+
+              # Describe pod for additional debugging on each check
+              echo "Describing pods for detailed status..."
+              kubectl describe pod -l app=api -n ${{ inputs.namespace }}
+
+              # Check events in the namespace for any image pull errors
+              echo "Checking recent events in the namespace..."
+              kubectl get events -n ${{ inputs.namespace }} --sort-by=.metadata.creationTimestamp | tail -n 10
+
+              sleep 10
+            done
+          ) &
+
+          # Run Helm upgrade command with debug and wait flags
+          echo "Running Helm upgrade with --debug and --wait..."
+          helm upgrade --install ${{ inputs.helm_release_name }} ${{ inputs.helm_chart_path }} \
+            --namespace ${{ inputs.namespace }} \
+            --create-namespace \
+            $values_args \
+            --debug --wait --timeout 5m
+
+          # Wait for background job to complete
