@@ -1,0 +1,58 @@
+name: Dynamic Environment Setup
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "GitHub runner to use"
+        required: true
+        type: string
+
+    outputs:
+      environment:
+        description: "The determined environment (dev, prpd, prod)"
+        value: ${{ steps.determine-env.outputs.environment }}
+
+jobs:
+  determine-environment:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Install yq (YAML processor)
+      - name: Install yq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      # Step 3: Parse branch-to-environment mapping from YAML
+      - name: Determine Environment from Branch Mapping
+        id: determine-env
+        run: |
+          branch_name="${{ github.ref_name }}"
+          echo "Current branch: $branch_name"
+
+          # Load environment mapping from YAML file
+          environment=$(yq eval ".branch_environment_mapping.\"$branch_name\"" .branch-config.yaml)
+
+          # If no specific mapping is found, apply default logic
+          if [ -z "$environment" ]; then
+            case "$branch_name" in
+              main | release/*)
+                environment="prod"
+                ;;
+              staging | prpd/*)
+                environment="prpd"
+                ;;
+              *)
+                environment="dev"
+                ;;
+            esac
+          fi
+
+          echo "Determined environment: $environment"
+          echo "environment=$environment" >> $GITHUB_OUTPUT
