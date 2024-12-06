@@ -1,0 +1,19 @@
+branch_environment_mapping:
+  # Main branches
+  main: prod
+  release/*: prod
+
+  # Preproduction branches
+  staging: prpd
+  hotfix/*: prod
+
+  # Development branches
+  feature/*: dev
+  bugfix/*: dev
+
+  # Custom team branches
+  custom-feature-branch: dev
+  experimental/*: dev
+
+  # Default behavior (not used directly in YAML but fallback logic in workflows)
+  # Any branch not explicitly listed will default to 'dev'
