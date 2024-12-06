@@ -1,0 +1,37 @@
+name: Deploy with Environment Setup and Helm
+
+on:
+  workflow_call:
+    inputs:
+      deploy_env:
+        required: false
+        type: string
+      runner:
+        required: true
+        type: string
+
+jobs:
+  # Step 1: Set Environment and Variables using Environment Setup Workflow
+  set-environment:
+    uses: Mars-DNA/reusable-workflows/.github/workflows/environment-setup-aks.yaml@main
+    with:
+      runner: ${{ inputs.runner }}
+      # if environment is not selected, it will be determined by your branch name
+      environment: ${{ github.event.inputs.deploy_env || '' }}
+
+  # Step 2: Deploy Application Using Helm with Environment Variables
+  deploy-application:
+    needs: set-environment
+    uses: Mars-DNA/reusable-workflows/.github/workflows/standard-helm-deploy-aks.yaml@main
+    with:
+      environment: ${{ needs.set-environment.outputs.environment }}
+      aks_resource_group: ${{ needs.set-environment.outputs.aks_resource_group }}
+      aks_cluster_name: ${{ needs.set-environment.outputs.aks_cluster_name }}
+      helm_release_name: ${{ needs.set-environment.outputs.helm_release_name }}
+      helm_chart_path: ${{ needs.set-environment.outputs.helm_chart_path }}
+      namespace: ${{ needs.set-environment.outputs.aks_namespace }}
+      runner: ${{ inputs.runner }}
+    secrets:
+      azure_client_id: ${{ needs.set-environment.outputs.azure_client_id }}
+      azure_subscription_id: ${{ needs.set-environment.outputs.azure_subscription_id }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }
